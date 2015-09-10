@@ -4,6 +4,8 @@
 (module+ test
   (require rackunit))
 
+;; TODO: change return type to (type . content)
+
 ;;=============================================================================
 ;; Helper functions
 
@@ -72,6 +74,9 @@
   (<?> (char #\space)
         "expected: space character"))
 
+(define $many-spaces
+  (many1 $space-char))
+
 (define $none-whitespace-char
   (<?> (<!> $whitespace-char)
        "expected: non-whitespace character"))
@@ -83,6 +88,11 @@
 (define $non-indent
   (<?> (oneOfStrings "   " "  " " " "")
        "expected: non indent space"))
+
+;;=============================================================================
+;; Inline
+(define $inline
+  (try (many1 (<!> (por $line-ending)))))
 
 ;;=============================================================================
 ;; Leaf Blocks
@@ -120,3 +130,41 @@
   (check-exn exn:fail? (lambda () (parse-result $horizontal-rule "a----\n")))
   (check-exn exn:fail? (lambda () (parse-result $horizontal-rule "---a---\n")))
   )
+
+;; ATX header, like:
+;; #.foo
+;; ##.foo
+(define $trailing-hashes-before-newline
+  (try (parser-compose
+         $many-spaces
+         (many (char #\#))
+         $many-spaces
+         (lookAhead $line-ending)
+         (return null))))
+
+(define $atx-header
+  (<?> (parser-compose
+         $non-indent
+         (head <- (oneOfStrings "######" "#####" "####" "###" "##" "#"))
+         $many-spaces
+         (xs <- (many1Till (<or> $trailing-hashes-before-newline
+                                 $inline)
+                           $line-ending))
+         (return (cons (list->string head) (format "~a" xs))))
+       "expected: ATX header"))
+
+(module+ test
+(check-equal? (parse-result $atx-header "# foo\n") '("#" . "foo"))
+(check-equal? (parse-result $atx-header "## foo\n") '("##" . "foo"))
+(check-equal? (parse-result $atx-header "### foo\n") '("###" . "foo"))
+(check-equal? (parse-result $atx-header "#### foo\n") '("####" . "foo"))
+(check-equal? (parse-result $atx-header "##### foo\n") '("#####" . "foo"))
+(check-equal? (parse-result $atx-header "###### foo\n") '("######" . "foo"))
+(check-exn exn:fail? (lambda () (parse-result $atx-header "####### foo\n")))
+(check-exn exn:fail? (lambda () (parse-result $atx-header "#5 foo\n")))
+(check-exn exn:fail? (lambda () (parse-result $atx-header "#foobar\n")))
+(check-exn exn:fail? (lambda () (parse-result $atx-header "\\# foo\n")))
+(check-equal? (parse-result $atx-header "# foo *bar* \\*baz\\*\n") '("#" . "foo *bar* \\*baz\\*"))
+;; TODO: add more test.
+)
+
