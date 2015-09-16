@@ -23,6 +23,9 @@
             (string "\r\n"))
        "expected: line ending."))
 
+(define $none-line-ending
+  (<!> $line-ending))
+
 (module+ test
   (check-equal? (parse-result $line-ending "\n") '(#\newline))
   (check-equal? (parse-result $line-ending "\r") '(#\return))
@@ -89,8 +92,51 @@
   (<?> (oneOfStrings "   " "  " " " "")
        "expected: non indent space"))
 
+;;
+(define (line-ending->space char)
+  (case char
+    [(#\newline #\return) #\space]
+    [else char]))
+
 ;;=============================================================================
 ;; Inline
+
+;; backslash escape
+(define $escaped-char
+  (<?> (parser-one
+         (char #\\)
+         (~> $none-line-ending))
+       "expected: escaped chars"))
+
+;; entities
+;; skip for now
+
+;; code spans
+(define $code-span
+  (<?> (parser-compose
+         ($backtick-string <- (many1 (char #\`)))
+         (code <- (manyUntil
+                    (<or> (try (parser-compose
+                                 (orig <- (string (list->string $backtick-string)))
+                                 (addition <- (many1 (char #\`)))
+                                 (return (append orig addition))))
+                          $anyChar)
+                    (try (parser-one
+                           (~> (string (list->string $backtick-string)))
+                           (lookAhead (<!> (char #\`)))))))
+         (return (string-normalize-spaces (list->string (flatten code)))))
+       "expected: code span"))
+
+(module+ test
+  (check-equal? (parse-result $code-span "`abc`x") "abc")
+  (check-equal? (parse-result $code-span "``abc``x") "abc")
+  (check-equal? (parse-result $code-span "``a`b``x") "a`b")
+  (check-equal? (parse-result $code-span "`` foo ` bar  ``x") "foo ` bar")
+  (check-equal? (parse-result $code-span "`` ``` ``x") "```")
+  (check-equal? (parse-result $code-span "``\nfoo\n``x") "foo")
+  (check-equal? (parse-result $code-span "`foo   bar\n  baz`x") "foo bar baz")
+  (check-equal? (parse-result $code-span "`foo\\`bar`x") "foo\\"))
+
 (define $inline
   (try (many1 (<!> (por $line-ending)))))
 
@@ -160,6 +206,7 @@
 (check-equal? (parse-result $atx-header "#### foo\n") '("####" . "foo"))
 (check-equal? (parse-result $atx-header "##### foo\n") '("#####" . "foo"))
 (check-equal? (parse-result $atx-header "###### foo\n") '("######" . "foo"))
+(check-equal? (parse-result $atx-header "   ###### foo\n") '("######" . "foo"))
 (check-exn exn:fail? (lambda () (parse-result $atx-header "####### foo\n")))
 (check-exn exn:fail? (lambda () (parse-result $atx-header "#5 foo\n")))
 (check-exn exn:fail? (lambda () (parse-result $atx-header "#foobar\n")))
@@ -167,4 +214,3 @@
 (check-equal? (parse-result $atx-header "# foo *bar* \\*baz\\*\n") '("#" . "foo *bar* \\*baz\\*"))
 ;; TODO: add more test.
 )
-
